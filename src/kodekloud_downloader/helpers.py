@@ -177,7 +177,6 @@ def download_video(
         "verbose": logger.getEffectiveLevel() == logging.DEBUG,
         "merge_output_format": "mkv",
         "writesubtitles": True,
-        "no_write_sub": True,
         "http_headers": headers,
     }
     if cookie is not None:
@@ -199,21 +198,29 @@ def is_normal_content(content) -> bool:
     return not (is_lab or is_feedback)
 
 
-def download_all_pdf(content, download_path: Path, cookie: Optional[str]) -> None:
+def download_all_pdf(
+    content,
+    download_path: Path,
+    cookie: Optional[str] = None,
+    session_token: Optional[str] = None,
+) -> None:
     """
     Download all PDF files from the given content.
 
     :param content: The content containing the PDF links
     :param download_path: The output directory for the downloaded PDFs
     :param cookie: The user's authentication cookie (None for browser auth)
+    :param session_token: Optional Bearer session token for authenticated downloads
     """
     for link in content.find_all("a"):
         href = link.get("href")
-        if href.endswith("pdf"):
+        if href and href.endswith("pdf"):
             file_name = download_path / Path(href).name
             logger.info(f"Downloading {file_name}...")
             headers = {}
-            if cookie is not None:
+            if session_token:
+                headers["Authorization"] = f"Bearer {session_token}"
+            elif cookie is not None:
                 headers["Cookie"] = cookie
             response = requests.get(href, headers=headers, timeout=30)
             file_name.write_bytes(response.content)

@@ -147,8 +147,18 @@ def download_course(
             if lesson.type == "video":
                 url = f"https://learn-api.kodekloud.com/api/lessons/{lesson.id}"
 
-                response = session.get(url, headers=headers, params=params)
-                response.raise_for_status()
+                try:
+                    response = session.get(url, headers=headers, params=params)
+                    response.raise_for_status()
+                except requests.exceptions.HTTPError as ex:
+                    if ex.response is not None and ex.response.status_code == 401:
+                        raise SystemExit(
+                            "Authentication failed (401 Unauthorized). "
+                            "Your session token may have expired or is invalid. "
+                            "Please refresh your cookies or use --browser / --token."
+                        ) from None
+                    raise
+
                 lesson_video_url = response.json()["video_url"]
                 # TODO: Maybe if in future KodeKloud change the video streaming
                 # service, this area will need some working.
@@ -171,7 +181,9 @@ def download_course(
                 downloaded_videos[current_video_url] += 1
             else:
                 lesson_url = f"https://learn.kodekloud.com/user/courses/{course.slug}/module/{module.id}/lesson/{lesson.id}"
-                download_resource_lesson(lesson_url, file_path, cookie)
+                download_resource_lesson(
+                    lesson_url, file_path, cookie, session_token=session_token
+                )
 
 
 # Maximum safe path length (Windows MAX_PATH is 260, leave room for
@@ -232,7 +244,7 @@ def create_file_path(
             current_len = len(parts[i])
             if current_len > 10:
                 shorten_by = min(overage, current_len - 10)
-                parts[i] = parts[i][: current_len - shorten_by]
+                parts[i] = _shorten_component(parts[i], current_len - shorten_by)
                 # Rebuild the path
                 full = base / Path(*parts)
                 overage = len(str(full)) - _MAX_PATH_LENGTH
@@ -277,7 +289,10 @@ def download_video_lesson(
 
 
 def download_resource_lesson(
-    lesson_url, file_path: Path, cookie: Optional[str]
+    lesson_url,
+    file_path: Path,
+    cookie: Optional[str],
+    session_token: Optional[str] = None,
 ) -> None:
     """
     Download a resource lesson.
@@ -285,9 +300,16 @@ def download_resource_lesson(
     :param lesson_url: The lesson url
     :param file_path: The output file path for the resource
     :param cookie: The user's authentication cookie
+    :param session_token: The user's Bearer authentication token
     """
-    # TODO: Did we break this? I have no idea.
-    page = requests.get(lesson_url, timeout=30)
+    headers = {}
+    if session_token:
+        headers["Authorization"] = f"Bearer {session_token}"
+        headers["Cookie"] = f"session-cookie={session_token}"
+    elif cookie is not None:
+        headers["Cookie"] = cookie
+
+    page = requests.get(lesson_url, headers=headers, timeout=30)
     soup = BeautifulSoup(page.content, "html.parser")
     content = soup.find("div", class_="learndash_content_wrap")
 
@@ -297,4 +319,9 @@ def download_resource_lesson(
         file_path.with_suffix(".md").write_text(
             markdownify.markdownify(content.prettify()), encoding="utf-8"
         )
-        download_all_pdf(content=content, download_path=file_path.parent, cookie=cookie)
+        download_all_pdf(
+            content=content,
+            download_path=file_path.parent,
+            cookie=cookie,
+            session_token=session_token,
+        )

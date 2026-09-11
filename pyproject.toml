@@ -74,6 +74,12 @@ ignore = [
     "S112",   # try-except-continue is intentional for retry logic
     "S603",   # subprocess paths are from a hardcoded system list
 ]
+"tests/*" = [
+    "S106",   # allow test passwords/tokens
+    "S108",   # allow /tmp paths in tests
+    "E501",   # allow long test assertion lines
+]
+
 
 [tool.ruff.format]
 quote-style = "double"
