@@ -46,6 +46,18 @@ def test_create_file_path_zero_pads_lesson_index():
     assert "007 - Pods" in str(path)
 
 
+def test_create_file_path_zero_pads_module_index():
+    path = create_file_path(
+        output_dir="/tmp/downloads",
+        course_name="Kubernetes",
+        module_index=3,
+        module_name="Networking",
+        lesson_index=5,
+        lesson_name="Services",
+    )
+    assert "03 - Networking" in str(path)
+
+
 def test_create_file_path_truncates_overly_long_path():
     long_course = "A" * 100
     long_module = "B" * 100

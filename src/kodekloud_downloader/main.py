@@ -243,7 +243,7 @@ def create_file_path(
     parts = [
         "KodeKloud",
         sanitize_filename(course_name, max_length=80),
-        sanitize_filename(f"{module_index} - {module_name}", max_length=80),
+        sanitize_filename(f"{module_index:02d} - {module_name}", max_length=80),
         sanitize_filename(f"{lesson_index:03d} - {lesson_name}", max_length=80),
     ]
 
