@@ -9,7 +9,7 @@ import yt_dlp
 from bs4 import BeautifulSoup
 
 from kodekloud_downloader.helpers import (
-    download_all_pdf,
+    download_all_resources,
     download_video,
     is_normal_content,
     sanitize_filename,
@@ -159,7 +159,8 @@ def download_course(
                         ) from None
                     raise
 
-                lesson_video_url = response.json()["video_url"]
+                lesson_data = response.json()
+                lesson_video_url = lesson_data["video_url"]
                 # TODO: Maybe if in future KodeKloud change the video streaming
                 # service, this area will need some working.
                 # Try to generalize this for future enhancement?
@@ -179,10 +180,24 @@ def download_course(
                     )
                 download_video_lesson(current_video_url, file_path, cookie, quality)
                 downloaded_videos[current_video_url] += 1
+
+                video_content = lesson_data.get("content")
+                if video_content:
+                    download_all_resources(
+                        video_content,
+                        download_path=file_path.parent,
+                        cookie=cookie,
+                        session_token=session_token,
+                    )
             else:
                 lesson_url = f"https://learn.kodekloud.com/user/courses/{course.slug}/module/{module.id}/lesson/{lesson.id}"
                 download_resource_lesson(
-                    lesson_url, file_path, cookie, session_token=session_token
+                    lesson_url,
+                    file_path,
+                    cookie,
+                    session_token=session_token,
+                    lesson_id=lesson.id,
+                    course_id=course.id,
                 )
 
 
@@ -289,38 +304,65 @@ def download_video_lesson(
 
 
 def download_resource_lesson(
-    lesson_url,
+    lesson_url: str,
     file_path: Path,
-    cookie: Optional[str],
+    cookie: Optional[str] = None,
     session_token: Optional[str] = None,
+    lesson_id: Optional[str] = None,
+    course_id: Optional[str] = None,
 ) -> None:
     """
-    Download a resource lesson.
+    Download a resource lesson (article notes, presentation decks, or attachments).
 
-    :param lesson_url: The lesson url
+    :param lesson_url: The lesson web URL
     :param file_path: The output file path for the resource
     :param cookie: The user's authentication cookie
     :param session_token: The user's Bearer authentication token
+    :param lesson_id: Optional lesson ID (extracted from lesson_url if omitted)
+    :param course_id: Optional course ID
     """
-    headers = {}
+    headers: dict = {}
     if session_token:
         headers["Authorization"] = f"Bearer {session_token}"
-        headers["Cookie"] = f"session-cookie={session_token}"
-    elif cookie is not None:
+    if cookie is not None:
         headers["Cookie"] = cookie
 
-    page = requests.get(lesson_url, headers=headers, timeout=30)
-    soup = BeautifulSoup(page.content, "html.parser")
-    content = soup.find("div", class_="learndash_content_wrap")
+    # Extract lesson_id if not explicitly provided
+    if not lesson_id and "/lesson/" in lesson_url:
+        lesson_id = lesson_url.split("/lesson/")[-1].split("?")[0].strip("/")
 
-    if content and is_normal_content(content):
+    content_markdown: Optional[str] = None
+
+    # 1. Query modern REST API if lesson_id is known
+    if lesson_id:
+        api_url = f"https://learn-api.kodekloud.com/api/lessons/{lesson_id}"
+        params = {"course_id": course_id} if course_id else {}
+        try:
+            resp = requests.get(api_url, headers=headers, params=params, timeout=30)
+            if resp.status_code == 200:
+                data = resp.json()
+                content_markdown = data.get("content")
+        except Exception as ex:
+            logger.debug(f"API lesson fetch failed for {lesson_id}: {ex}")
+
+    # 2. Fall back to scraping lesson_url if API did not return content
+    if content_markdown is None:
+        try:
+            page = requests.get(lesson_url, headers=headers, timeout=30)
+            soup = BeautifulSoup(page.content, "html.parser")
+            content_elem = soup.find("div", class_="learndash_content_wrap")
+            if content_elem and is_normal_content(content_elem):
+                content_markdown = markdownify.markdownify(content_elem.prettify())
+        except Exception as ex:
+            logger.debug(f"HTML fallback failed for {lesson_url}: {ex}")
+
+    # 3. Save markdown content and download any attached resources
+    if content_markdown and content_markdown.strip():
         logger.info(f"Writing resource file... {file_path}...")
         file_path.parent.mkdir(parents=True, exist_ok=True)
-        file_path.with_suffix(".md").write_text(
-            markdownify.markdownify(content.prettify()), encoding="utf-8"
-        )
-        download_all_pdf(
-            content=content,
+        file_path.with_suffix(".md").write_text(content_markdown, encoding="utf-8")
+        download_all_resources(
+            content=content_markdown,
             download_path=file_path.parent,
             cookie=cookie,
             session_token=session_token,

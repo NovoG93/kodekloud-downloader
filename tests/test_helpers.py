@@ -95,3 +95,80 @@ def test_download_video_options_no_conflicting_subtitles():
 def test_parse_token_missing_file():
     with pytest.raises(FileNotFoundError):
         parse_token("non_existent_cookie_file.txt")
+
+
+def test_download_all_resources_from_markdown(tmp_path: Path):
+    """Test extracting and downloading resources (PDF, ZIP, PPTX) from Markdown."""
+    from kodekloud_downloader.helpers import download_all_resources
+
+    md_content = """
+    # Lecture Notes
+    Please download the resources below:
+    - [Presentation Deck](https://example.com/slides/chapter1.pdf)
+    - [Source Code](https://example.com/code/lab_assets.zip)
+    - [PowerPoint Slides](https://example.com/files/lecture.pptx)
+    - [External Site](https://example.com/docs)
+    """
+
+    with patch("requests.get") as mock_get:
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.iter_content.return_value = [b"binary_file_content"]
+        mock_resp.headers = {"Content-Length": "19"}
+        mock_get.return_value = mock_resp
+
+        downloaded = download_all_resources(
+            content=md_content,
+            download_path=tmp_path,
+            session_token="test_token",
+        )
+
+        assert len(downloaded) == 3
+        assert (tmp_path / "chapter1.pdf").exists()
+        assert (tmp_path / "lab_assets.zip").exists()
+        assert (tmp_path / "lecture.pptx").exists()
+        assert (tmp_path / "chapter1.pdf").read_bytes() == b"binary_file_content"
+
+
+def test_download_all_resources_handles_query_params_and_skips_existing(tmp_path: Path):
+    """Ensure URLs with query params extract clean filenames and existing files are skipped."""
+    from kodekloud_downloader.helpers import download_all_resources
+
+    # Pre-create chapter2.pdf to test skip logic
+    existing_file = tmp_path / "chapter2.pdf"
+    existing_file.write_bytes(b"already_downloaded")
+
+    md_content = """
+    [Download](https://res.cloudinary.com/kodekloud/file/upload/v1234/chapter2.pdf?token=xyz&exp=999)
+    """
+
+    with patch("requests.get") as mock_get:
+        downloaded = download_all_resources(
+            content=md_content,
+            download_path=tmp_path,
+        )
+
+        assert len(downloaded) == 1
+        assert existing_file.read_bytes() == b"already_downloaded"
+        # requests.get should not have been called because file exists
+        assert not mock_get.called
+
+
+def test_download_all_resources_handles_download_failure_gracefully(tmp_path: Path):
+    """Ensure a failed HTTP request logs an error and does not crash."""
+    from kodekloud_downloader.helpers import download_all_resources
+
+    md_content = "[Broken Link](https://example.com/missing.pdf)"
+
+    with patch("requests.get") as mock_get:
+        mock_resp = MagicMock()
+        mock_resp.status_code = 404
+        mock_resp.raise_for_status.side_effect = Exception("404 Not Found")
+        mock_get.return_value = mock_resp
+
+        # Should not raise exception
+        downloaded = download_all_resources(
+            content=md_content,
+            download_path=tmp_path,
+        )
+        assert downloaded == []

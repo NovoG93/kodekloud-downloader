@@ -104,3 +104,88 @@ def test_download_course_handles_401_gracefully():
                 session_token="invalid_token",
             )
         assert "401" in str(exc_info.value) or "expired" in str(exc_info.value).lower()
+
+
+def test_download_resource_lesson_api_writes_markdown_and_downloads_resources(tmp_path):
+    from unittest.mock import MagicMock, patch
+
+    from kodekloud_downloader.main import download_resource_lesson
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "id": "lesson-art-1",
+        "title": "Course Slides",
+        "type": "article",
+        "content": "# Slides\nDownload: [Slides](https://example.com/slides.pdf)",
+    }
+
+    file_path = tmp_path / "01 - Intro" / "01 - Slides"
+
+    with patch("requests.get", return_value=mock_resp) as mock_get, patch(
+        "kodekloud_downloader.main.download_all_resources"
+    ) as mock_dl_res:
+        download_resource_lesson(
+            lesson_url="https://learn.kodekloud.com/user/courses/test-slug/module/m1/lesson/lesson-art-1",
+            file_path=file_path,
+            cookie=None,
+            session_token="valid_jwt",
+            lesson_id="lesson-art-1",
+            course_id="course-123",
+        )
+
+        assert mock_get.called
+        assert (file_path.with_suffix(".md")).exists()
+        assert "# Slides" in (file_path.with_suffix(".md")).read_text(encoding="utf-8")
+        assert mock_dl_res.called
+        # download_all_resources should receive the content and destination directory
+        kwargs = mock_dl_res.call_args.kwargs
+        args = mock_dl_res.call_args.args
+        actual_content = kwargs.get("content") or (args[0] if args else None)
+        actual_dest = kwargs.get("download_path") or (
+            args[1] if len(args) > 1 else None
+        )
+        assert actual_content == mock_resp.json.return_value["content"]
+        assert actual_dest == file_path.parent
+
+
+def test_download_course_handles_article_lessons(tmp_path):
+    from unittest.mock import MagicMock, patch
+
+    from kodekloud_downloader.main import download_course
+
+    mock_course = MagicMock()
+    mock_course.id = "c-1"
+    mock_course.slug = "c-slug"
+    mock_course.title = "Sample Course"
+
+    mock_module = MagicMock()
+    mock_module.id = "m-1"
+    mock_module.title = "Module One"
+
+    mock_lesson = MagicMock()
+    mock_lesson.id = "l-1"
+    mock_lesson.title = "Course Deck"
+    mock_lesson.type = "article"
+
+    mock_module.lessons = [mock_lesson]
+    mock_course.modules = [mock_module]
+
+    with patch("requests.Session") as mock_session_cls, patch(
+        "kodekloud_downloader.main.download_resource_lesson"
+    ) as mock_dl_res_lesson:
+        mock_session = MagicMock()
+        mock_session_cls.return_value = mock_session
+
+        download_course(
+            course=mock_course,
+            quality="720p",
+            output_dir=tmp_path,
+            max_duplicate_count=3,
+            session_token="valid_jwt",
+        )
+
+        assert mock_dl_res_lesson.called
+        assert mock_dl_res_lesson.call_args[1].get(
+            "lesson_id"
+        ) == "l-1" or mock_dl_res_lesson.call_args[0][0].endswith("l-1")

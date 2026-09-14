@@ -1,8 +1,9 @@
 import logging
 import re
 import string
+import urllib.parse
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, List, Optional, Set, Tuple
 
 import prettytable
 import requests
@@ -198,32 +199,168 @@ def is_normal_content(content) -> bool:
     return not (is_lab or is_feedback)
 
 
+RESOURCE_EXTENSIONS: Tuple[str, ...] = (
+    ".pdf",
+    ".zip",
+    ".tar.gz",
+    ".tgz",
+    ".tar",
+    ".gz",
+    ".7z",
+    ".rar",
+    ".pptx",
+    ".ppt",
+    ".docx",
+    ".doc",
+    ".xlsx",
+    ".xls",
+    ".csv",
+    ".epub",
+    ".ipynb",
+    ".yaml",
+    ".yml",
+    ".json",
+    ".sh",
+    ".py",
+    ".txt",
+)
+
+
+def _is_resource_target(url_or_name: str) -> bool:
+    """Check if a URL or name ends with a known resource extension."""
+    clean = url_or_name.lower().split("?")[0].split("#")[0].strip()
+    return any(clean.endswith(ext) for ext in RESOURCE_EXTENSIONS)
+
+
+def extract_resource_urls(content: Any) -> List[Tuple[str, str]]:
+    """
+    Extract (url, title_or_text) pairs for downloadable resources from Markdown or HTML.
+
+    :param content: Markdown string or BeautifulSoup element
+    :return: List of tuples (url, link_text)
+    """
+    results: List[Tuple[str, str]] = []
+    seen_urls: Set[str] = set()
+
+    if hasattr(content, "find_all"):
+        # BeautifulSoup tag or document
+        for link in content.find_all("a"):
+            href = link.get("href")
+            if href and isinstance(href, str) and href.startswith("http"):
+                text = link.get_text(strip=True)
+                if _is_resource_target(href) or _is_resource_target(text):
+                    if href not in seen_urls:
+                        seen_urls.add(href)
+                        results.append((href, text))
+    elif isinstance(content, str):
+        # Markdown links: [Link Text](https://url)
+        md_links = re.findall(r"(?<!!)\[([^\]]*)\]\((https?://[^\s\)\"\']+)\)", content)
+        for text, url in md_links:
+            if _is_resource_target(url) or _is_resource_target(text):
+                if url not in seen_urls:
+                    seen_urls.add(url)
+                    results.append((url, text))
+
+        # Bare URLs: https://...
+        bare_urls = re.findall(r"(https?://[^\s\"\'<>\[\]\)]+)", content)
+        for url in bare_urls:
+            if _is_resource_target(url) and url not in seen_urls:
+                seen_urls.add(url)
+                results.append((url, ""))
+
+    return results
+
+
+def _resolve_resource_filename(url: str, title: str = "") -> str:
+    """Resolve a sanitized filename from a URL and an optional link title."""
+    parsed = urllib.parse.urlparse(url)
+    url_filename = Path(urllib.parse.unquote(parsed.path)).name
+
+    if _is_resource_target(url_filename) and url_filename:
+        target_name = url_filename
+    elif title and _is_resource_target(title):
+        target_name = title
+    elif url_filename:
+        target_name = url_filename
+    else:
+        target_name = "resource.bin"
+
+    return sanitize_filename(target_name)
+
+
+def download_all_resources(
+    content: Any,
+    download_path: Path,
+    cookie: Optional[str] = None,
+    session_token: Optional[str] = None,
+) -> List[Path]:
+    """
+    Download all resources (PDFs, archives, documents, etc.) from the given content.
+
+    :param content: Markdown string or BeautifulSoup element containing resource links
+    :param download_path: The directory where downloaded resources will be saved
+    :param cookie: The user's authentication cookie
+    :param session_token: Optional Bearer session token for authenticated downloads
+    :return: List of Paths of downloaded files
+    """
+    downloaded_files: List[Path] = []
+    items = extract_resource_urls(content)
+
+    if not items:
+        return downloaded_files
+
+    download_path.mkdir(parents=True, exist_ok=True)
+    headers: dict = {}
+    if session_token:
+        headers["Authorization"] = f"Bearer {session_token}"
+    elif cookie is not None:
+        headers["Cookie"] = cookie
+
+    for url, title in items:
+        file_name = _resolve_resource_filename(url, title)
+        target_path = download_path / file_name
+
+        if target_path.exists() and target_path.stat().st_size > 0:
+            logger.info(f"Resource {file_name} already exists, skipping...")
+            downloaded_files.append(target_path)
+            continue
+
+        logger.info(f"Downloading resource: {file_name} from {url}...")
+        try:
+            resp = requests.get(url, headers=headers, stream=True, timeout=60)
+            resp.raise_for_status()
+            with open(target_path, "wb") as f:
+                wrote_bytes = False
+                for chunk in resp.iter_content(chunk_size=65536):
+                    if chunk:
+                        f.write(chunk)
+                        wrote_bytes = True
+                if not wrote_bytes and hasattr(resp, "content") and resp.content:
+                    f.write(resp.content)
+            downloaded_files.append(target_path)
+            logger.info(f"Saved resource: {target_path}")
+        except Exception as ex:
+            logger.warning(f"Failed to download resource from {url}: {ex}")
+
+    return downloaded_files
+
+
 def download_all_pdf(
-    content,
+    content: Any,
     download_path: Path,
     cookie: Optional[str] = None,
     session_token: Optional[str] = None,
 ) -> None:
     """
     Download all PDF files from the given content.
-
-    :param content: The content containing the PDF links
-    :param download_path: The output directory for the downloaded PDFs
-    :param cookie: The user's authentication cookie (None for browser auth)
-    :param session_token: Optional Bearer session token for authenticated downloads
+    Retained for backwards compatibility; delegates to download_all_resources.
     """
-    for link in content.find_all("a"):
-        href = link.get("href")
-        if href and href.endswith("pdf"):
-            file_name = download_path / Path(href).name
-            logger.info(f"Downloading {file_name}...")
-            headers = {}
-            if session_token:
-                headers["Authorization"] = f"Bearer {session_token}"
-            elif cookie is not None:
-                headers["Cookie"] = cookie
-            response = requests.get(href, headers=headers, timeout=30)
-            file_name.write_bytes(response.content)
+    download_all_resources(
+        content=content,
+        download_path=download_path,
+        cookie=cookie,
+        session_token=session_token,
+    )
 
 
 def parse_token(cookiefile: str) -> Optional[str]:
