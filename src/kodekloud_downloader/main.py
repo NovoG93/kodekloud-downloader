@@ -133,14 +133,16 @@ def download_course(
     )
 
     downloaded_videos: defaultdict = defaultdict(int)
+    global_lesson_index = 0
     for module_index, module in enumerate(course_detail.modules, start=1):
-        for lesson_index, lesson in enumerate(module.lessons, start=1):
+        for lesson in module.lessons:
+            global_lesson_index += 1
             file_path = create_file_path(
                 output_dir,
                 course.title,
                 module_index,
                 module.title,
-                lesson_index,
+                global_lesson_index,
                 lesson.title,
             )
 
@@ -242,7 +244,7 @@ def create_file_path(
         "KodeKloud",
         sanitize_filename(course_name, max_length=80),
         sanitize_filename(f"{module_index} - {module_name}", max_length=80),
-        sanitize_filename(f"{lesson_index} - {lesson_name}", max_length=80),
+        sanitize_filename(f"{lesson_index:03d} - {lesson_name}", max_length=80),
     ]
 
     # Build the base path and check total length

@@ -31,7 +31,19 @@ def test_create_file_path_under_max_length():
     assert len(str(path)) <= _MAX_PATH_LENGTH
     assert "Docker Basics" in str(path)
     assert "Getting Started" in str(path)
-    assert "Containers" in str(path)
+    assert "002 - Containers" in str(path)
+
+
+def test_create_file_path_zero_pads_lesson_index():
+    path = create_file_path(
+        output_dir="/tmp/downloads",
+        course_name="Kubernetes",
+        module_index=1,
+        module_name="Intro",
+        lesson_index=7,
+        lesson_name="Pods",
+    )
+    assert "007 - Pods" in str(path)
 
 
 def test_create_file_path_truncates_overly_long_path():
@@ -189,3 +201,56 @@ def test_download_course_handles_article_lessons(tmp_path):
         assert mock_dl_res_lesson.call_args[1].get(
             "lesson_id"
         ) == "l-1" or mock_dl_res_lesson.call_args[0][0].endswith("l-1")
+
+
+def test_download_course_global_sequential_indexing(tmp_path):
+    from unittest.mock import MagicMock, patch
+
+    from kodekloud_downloader.main import download_course
+
+    mock_course = MagicMock()
+    mock_course.id = "c-1"
+    mock_course.slug = "c-slug"
+    mock_course.title = "Sample Course"
+
+    # Module 1 with 2 lessons
+    m1 = MagicMock()
+    m1.id = "m-1"
+    m1.title = "Module 1"
+    l1 = MagicMock(id="l-1", title="Lesson 1", type="article")
+    l2 = MagicMock(id="l-2", title="Lesson 2", type="article")
+    m1.lessons = [l1, l2]
+
+    # Module 2 with 2 lessons
+    m2 = MagicMock()
+    m2.id = "m-2"
+    m2.title = "Module 2"
+    l3 = MagicMock(id="l-3", title="Lesson 3", type="article")
+    l4 = MagicMock(id="l-4", title="Lesson 4", type="article")
+    m2.lessons = [l3, l4]
+
+    mock_course.modules = [m1, m2]
+
+    captured_file_paths = []
+
+    def fake_download_resource(lesson_url, file_path, *args, **kwargs):
+        captured_file_paths.append(str(file_path))
+
+    with patch("requests.Session"), patch(
+        "kodekloud_downloader.main.download_resource_lesson",
+        side_effect=fake_download_resource,
+    ):
+        download_course(
+            course=mock_course,
+            quality="720p",
+            output_dir=tmp_path,
+            max_duplicate_count=3,
+            session_token="valid_jwt",
+        )
+
+    assert len(captured_file_paths) == 4
+    # Check that lesson indexing increments across modules
+    assert "001 - Lesson 1" in captured_file_paths[0]
+    assert "002 - Lesson 2" in captured_file_paths[1]
+    assert "003 - Lesson 3" in captured_file_paths[2]
+    assert "004 - Lesson 4" in captured_file_paths[3]
