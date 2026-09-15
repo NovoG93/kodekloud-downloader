@@ -16,10 +16,14 @@ This PR:
    - Numbers lessons with 3-digit zero-padding continuously across the entire course (`001 - <lesson-name>`, `002 - ...`) rather than restarting at `1` inside every module folder.
    - Numbers module directories with 2-digit zero-padding (`01 - <module-name>`, `02 - ...`) to ensure clean alphabetical and chronological sorting.
 3. **Adds Resource & Article Downloads**: Downloads course presentation decks, study guides, PDFs, slides, and archive attachments (with automatic GitHub blob URL normalization to raw content), while saving lesson reading materials and notes as clean Markdown files (`.md`).
-4. **TUI Course Search & Instructor Visibility**: Adds an "Instructor" column to the course selection table, supports interactive keyword filtering directly in the prompt, and introduces the `--search` / `-s` CLI flag for `kodekloud dl`.
+4. **TUI Course Search, Category Filter & Instructor Visibility**:
+   - Adds an "Instructor" column to the course selection table.
+   - Adds `-f` / `--filter` (alias `--category`) to filter by one or multiple categories (e.g. `-f "Golden Kubestronaut"` or `-f "Security, AI"`).
+   - Supports `--search` / `-s` for keyword matching, and interactive prompts for `c:<category>`, keyword search, and `cats` category discovery.
 5. **Fixes Downloader Bugs**: Solves subtitle overwrites, path shortening bugs, CLI argument forwarding, and quiz question ordering races.
-6. **Expands Test Suite**: Adds 42 automated tests across 6 test modules, taking test coverage from 1% to over 60%.
+6. **Expands Test Suite**: Adds 47 automated tests across 6 test modules, taking test coverage from 1% to over 65%.
 7. **Modernizes Google Colab Notebook**: Adds token prompts, browser exchange, and batch MP3 audio conversion.
+
 
 
 ---
@@ -54,17 +58,18 @@ This PR:
 - **Fast Startup**: Removed slow `!sudo apt update && sudo apt upgrade` calls (FFmpeg is pre-installed in Colab).
 - **Batch MP3 Conversion**: Added post-processing cell that scans downloaded videos, zero-pads track numbering (`01 - ...`), and exports MP3 audio tracks via `ffmpeg`.
 
-### 6. Course Search & Instructor Visibility
-- **Instructor Column**: Added "Instructor" to course selection table so authors and tutors are immediately visible.
-- **Interactive Search / Filtering**: Users can type search keywords directly in the course selection prompt to filter the table.
+### 6. Course Search, Category Filtering & Instructor Visibility
+- **Category Filter Flag (`-f` / `--filter` / `--category`)**: Allows filtering courses by one or more categories (comma-separated, e.g. `-f "Golden Kubestronaut"` or `-f "Security, AI"`).
+- **Instructor Column**: Added "Instructor" to the course selection table so authors and tutors are immediately visible.
+- **Interactive Search & Category Discovery**: Users can type search keywords or `c:<category>` directly in the course selection prompt to filter the table on the fly, or `cats` to view a breakdown of all 34 categories.
 - **CLI Search Flag**: Added `--search` / `-s` flag to `kodekloud dl`.
 - **GitHub Raw Normalization**: Converts GitHub blob URLs to raw file URLs to ensure valid binary downloads.
 
 ### 7. Test Suite Expansion
-- Added **42 automated tests** across 6 test modules:
+- Added **47 automated tests** across 6 test modules:
   - `tests/test_main.py`: Module zero-padding (`01 - ...`), global cross-module sequential indexing (`001 - ...`), path shortening, 401 error handling.
-  - `tests/test_helpers.py`: Table rendering with instructors, interactive search/filter, resource extraction (Markdown & bare URLs), GitHub blob URL rewriting, streaming downloads, subtitle handling, filename sanitization.
-  - `tests/test_cli.py`: CLI flags (`--token`, `--cookie`, `--search`, help, error handling).
+  - `tests/test_helpers.py`: Category filtering (`filter_by_category`), categories summary table, table rendering with instructors, interactive search/filter, resource extraction (Markdown & bare URLs), GitHub blob URL rewriting, streaming downloads, subtitle handling, filename sanitization.
+  - `tests/test_cli.py`: CLI flags (`--token`, `--cookie`, `--search`, `--filter`, help, error handling).
   - `tests/test_auth_exchange.py`: Headless cookie-to-token exchange.
   - `tests/test_models.py`: Quiz question ordering.
   - `tests/test_kodekloud_dl.py`: Integration smoke tests.
@@ -86,6 +91,7 @@ uv run mypy src
 # Success: no issues found in 11 source files
 
 uv run pytest
-# ================= 42 passed in 8.27s =================
+# ================= 47 passed in 7.51s =================
 ```
+
 
