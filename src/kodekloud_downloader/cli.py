@@ -75,6 +75,17 @@ def kodekloud(verbose):
     default=None,
     help="Filter course list by keyword (title, instructor, or category).",
 )
+@click.option(
+    "--filter",
+    "-f",
+    "--category",
+    "category_filter",
+    default=None,
+    help=(
+        "Filter course list by category "
+        "(e.g. 'Kubernetes', 'Security', 'Golden Kubestronaut')."
+    ),
+)
 def dl(
     course_url,
     quality: str,
@@ -84,6 +95,7 @@ def dl(
     token: Optional[str],
     max_duplicate_count: int,
     search: Optional[str],
+    category_filter: Optional[str],
 ):
     session_token: Optional[str] = None
 
@@ -148,7 +160,9 @@ def dl(
 
     if course_url is None:
         courses = collect_all_courses()
-        selected_courses = select_courses(courses, query=search)
+        selected_courses = select_courses(
+            courses, query=search, category=category_filter
+        )
         for selected_course in selected_courses:
             download_course(
                 course=selected_course,

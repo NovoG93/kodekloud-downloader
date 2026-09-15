@@ -22,6 +22,7 @@ def test_cli_dl_help():
     assert "--browser" in result.output
     assert "--token" in result.output
     assert "--search" in result.output
+    assert "--filter" in result.output
 
 
 def test_cli_missing_auth():
@@ -140,3 +141,27 @@ def test_cli_forwards_search_to_select_courses():
         assert result.exit_code == 0
         assert mock_select.called
         assert mock_select.call_args[1].get("query") == "cnpe"
+
+
+def test_cli_forwards_category_filter_to_select_courses():
+    runner = CliRunner()
+    with patch("kodekloud_downloader.cli.collect_all_courses") as mock_collect, patch(
+        "kodekloud_downloader.cli.select_courses"
+    ) as mock_select, patch("kodekloud_downloader.cli.download_course"):
+        mock_course = MagicMock()
+        mock_collect.return_value = [mock_course]
+        mock_select.return_value = [mock_course]
+
+        result = runner.invoke(
+            kodekloud,
+            [
+                "dl",
+                "--token",
+                "direct_token",
+                "-f",
+                "Golden Kubestronaut",
+            ],
+        )
+        assert result.exit_code == 0
+        assert mock_select.called
+        assert mock_select.call_args[1].get("category") == "Golden Kubestronaut"

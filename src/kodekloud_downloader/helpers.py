@@ -2,8 +2,9 @@ import logging
 import re
 import string
 import urllib.parse
+from collections import defaultdict
 from pathlib import Path
-from typing import Any, List, Optional, Set, Tuple
+from typing import Any, List, Optional, Set, Tuple, Union, cast
 
 import prettytable
 import requests
@@ -79,11 +80,66 @@ def render_course_table(
     return table
 
 
-def _filter_courses(courses: List[Course], query: str) -> List[Tuple[int, Course]]:
+def _to_indexed(
+    courses: Union[List[Course], List[Tuple[int, Course]]],
+) -> List[Tuple[int, Course]]:
+    """Ensure list is in (1-based index, Course) format."""
+    if not courses:
+        return []
+    first = courses[0]
+    if isinstance(first, tuple) and len(first) == 2 and isinstance(first[0], int):
+        return cast(List[Tuple[int, Course]], courses)
+    return list(enumerate(cast(List[Course], courses), start=1))
+
+
+def filter_by_category(
+    courses: Union[List[Course], List[Tuple[int, Course]]],
+    category_query: str,
+) -> List[Tuple[int, Course]]:
+    """Filter courses by category matching any comma-separated token.
+
+    :param courses: List of Course objects or (index, Course) tuples.
+    :param category_query: Comma-separated category keywords.
+    :return: Filtered list of (1-based index, Course) tuples.
+    """
+    indexed = _to_indexed(courses)
+    tokens = [t.strip().lower() for t in category_query.split(",") if t.strip()]
+    if not tokens:
+        return indexed
+
+    matches: List[Tuple[int, Course]] = []
+    for idx, course in indexed:
+        cat_names = [cat.name.lower() for cat in course.categories]
+        if any(any(tok in cat for cat in cat_names) for tok in tokens):
+            matches.append((idx, course))
+    return matches
+
+
+def render_categories_summary(courses: List[Course]) -> prettytable.PrettyTable:
+    """Build a summary table of all unique categories and their course counts."""
+    counts: dict = defaultdict(int)
+    for course in courses:
+        for cat in course.categories:
+            counts[cat.name] += 1
+
+    table = prettytable.PrettyTable()
+    table.field_names = ["Category", "Courses"]
+    for cat_name, count in sorted(counts.items(), key=lambda x: (-x[1], x[0])):
+        table.add_row([cat_name, count])
+    table.align["Category"] = "l"
+    table.align["Courses"] = "r"
+    return table
+
+
+def _filter_courses(
+    courses: Union[List[Course], List[Tuple[int, Course]]],
+    query: str,
+) -> List[Tuple[int, Course]]:
     """Filter courses by keyword across title, instructor, category, and slug."""
+    indexed = _to_indexed(courses)
     q = query.strip().lower()
     matches: List[Tuple[int, Course]] = []
-    for idx, course in enumerate(courses, start=1):
+    for idx, course in indexed:
         title = course.title.lower()
         slug = course.slug.lower()
         instructors = " ".join([t.name.lower() for t in course.tutors])
@@ -93,30 +149,50 @@ def _filter_courses(courses: List[Course], query: str) -> List[Tuple[int, Course
     return matches
 
 
-def select_courses(courses: List[Course], query: Optional[str] = None) -> List[Course]:
+def select_courses(
+    courses: List[Course],
+    query: Optional[str] = None,
+    category: Optional[str] = None,
+) -> List[Course]:
     """
     Display a table of courses and ask the user to select one or
-    multiple courses by entering its number, or filter interactively by keyword.
+    multiple courses by entering its number, or filter interactively
+    by keyword/category.
 
     :param courses: A list of Course objects to choose from
     :param query: Optional initial search term to pre-filter courses
+    :param category: Optional initial category filter (comma-separated supported)
     :return: The selected list of Course objects
     """
     indexed_all: List[Tuple[int, Course]] = list(enumerate(courses, start=1))
 
-    current_items = _filter_courses(courses, query) if query else indexed_all
-    if query and not current_items:
-        print(
-            f"No courses found matching initial filter '{query}'. Showing all courses."
-        )
-        current_items = indexed_all
+    current_items = indexed_all
+    if category:
+        filtered_cat = filter_by_category(current_items, category)
+        if not filtered_cat:
+            print(
+                f"No courses found matching category filter '{category}'. "
+                "Showing all courses."
+            )
+        else:
+            current_items = filtered_cat
+
+    if query:
+        filtered_query = _filter_courses(current_items, query)
+        if not filtered_query:
+            print(
+                f"No courses found matching search filter '{query}'. "
+                "Showing previous view."
+            )
+        else:
+            current_items = filtered_query
 
     print(render_course_table(current_items))
 
     while True:
         prompt = (
             "Enter course number(s) to select (e.g. 1,6-9), "
-            "search keyword to filter (or 'all'/'q'): "
+            "search keyword, 'c:<cat>', or 'all'/'cats'/'q': "
         )
         try:
             user_input = input(prompt).strip()
@@ -135,6 +211,27 @@ def select_courses(courses: List[Course], query: Optional[str] = None) -> List[C
             print(render_course_table(current_items))
             continue
 
+        if user_input.lower() in ("cats", "categories"):
+            print(render_categories_summary(courses))
+            continue
+
+        if user_input.lower().startswith(("c:", "cat:", "category:")):
+            cat_query = user_input.split(":", 1)[1].strip()
+            filtered = filter_by_category(indexed_all, cat_query)
+            if filtered:
+                current_items = filtered
+                print(render_course_table(current_items))
+                print(
+                    f"Found {len(filtered)} course(s) in category matching "
+                    f"'{cat_query}'."
+                )
+            else:
+                print(
+                    f"No courses found in category matching '{cat_query}'. "
+                    "Type 'cats' to see all categories."
+                )
+            continue
+
         try:
             selected_indices = parse_input(user_input)
             invalid = [i for i in selected_indices if i < 1 or i > len(courses)]
@@ -147,7 +244,7 @@ def select_courses(courses: List[Course], query: Optional[str] = None) -> List[C
             return [courses[i - 1] for i in selected_indices]
         except ValueError:
             # User entered a search term instead of numeric range
-            filtered = _filter_courses(courses, user_input)
+            filtered = _filter_courses(indexed_all, user_input)
             if filtered:
                 current_items = filtered
                 print(render_course_table(current_items))

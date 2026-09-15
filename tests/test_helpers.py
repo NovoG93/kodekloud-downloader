@@ -299,3 +299,72 @@ def test_select_courses_interactive_search():
     with patch("builtins.input", side_effect=["q"]):
         selected = select_courses(courses)
         assert selected == []
+
+
+def test_filter_by_category():
+    from kodekloud_downloader.helpers import filter_by_category
+
+    c1 = _make_test_course(
+        1, "CKA", "cka", ["Mumshad"], ["Kubernetes", "Golden Kubestronaut"]
+    )
+    c2 = _make_test_course(2, "KCSA", "kcsa", ["Nourhan"], ["Security"])
+    c3 = _make_test_course(3, "Python", "python", ["Sanjeev"], ["Programming"])
+    courses = [c1, c2, c3]
+
+    # Single category
+    res = filter_by_category(courses, "Security")
+    assert len(res) == 1
+    assert res[0][1].title == "KCSA"
+
+    # Multi category (comma-separated)
+    res = filter_by_category(courses, "Kubernetes, Security")
+    assert len(res) == 2
+
+    # Case-insensitive partial matching
+    res = filter_by_category(courses, "kubestronaut")
+    assert len(res) == 1
+    assert res[0][1].title == "CKA"
+
+    # Non-existent category
+    res = filter_by_category(courses, "NonExistent")
+    assert res == []
+
+
+def test_render_categories_summary():
+    from kodekloud_downloader.helpers import render_categories_summary
+
+    c1 = _make_test_course(1, "CKA", "cka", ["Mumshad"], ["Kubernetes", "DevOps"])
+    c2 = _make_test_course(2, "KCSA", "kcsa", ["Nourhan"], ["Security", "Kubernetes"])
+    table = render_categories_summary([c1, c2])
+    table_str = str(table)
+    assert "Kubernetes" in table_str
+    assert "DevOps" in table_str
+    assert "Security" in table_str
+
+
+def test_select_courses_category_arg():
+    from kodekloud_downloader.helpers import select_courses
+
+    c1 = _make_test_course(1, "CKA", "cka", ["Mumshad"], ["Kubernetes"])
+    c2 = _make_test_course(2, "KCSA", "kcsa", ["Nourhan"], ["Security"])
+    courses = [c1, c2]
+
+    # Category provided as arg, select course 2
+    with patch("builtins.input", side_effect=["2"]):
+        selected = select_courses(courses, category="Security")
+        assert len(selected) == 1
+        assert selected[0].title == "KCSA"
+
+
+def test_select_courses_interactive_category_command():
+    from kodekloud_downloader.helpers import select_courses
+
+    c1 = _make_test_course(1, "CKA", "cka", ["Mumshad"], ["Kubernetes"])
+    c2 = _make_test_course(2, "KCSA", "kcsa", ["Nourhan"], ["Security"])
+    courses = [c1, c2]
+
+    # Interactive 'c:security' then select 2
+    with patch("builtins.input", side_effect=["c:security", "2"]):
+        selected = select_courses(courses)
+        assert len(selected) == 1
+        assert selected[0].title == "KCSA"
