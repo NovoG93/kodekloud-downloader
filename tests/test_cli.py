@@ -21,6 +21,7 @@ def test_cli_dl_help():
     assert "--cookie" in result.output
     assert "--browser" in result.output
     assert "--token" in result.output
+    assert "--search" in result.output
 
 
 def test_cli_missing_auth():
@@ -115,3 +116,27 @@ def test_cli_supports_token_option():
         assert mock_dl.called
         call_kwargs = mock_dl.call_args[1]
         assert call_kwargs.get("session_token") == "my_direct_jwt_token"
+
+
+def test_cli_forwards_search_to_select_courses():
+    runner = CliRunner()
+    with patch("kodekloud_downloader.cli.collect_all_courses") as mock_collect, patch(
+        "kodekloud_downloader.cli.select_courses"
+    ) as mock_select, patch("kodekloud_downloader.cli.download_course"):
+        mock_course = MagicMock()
+        mock_collect.return_value = [mock_course]
+        mock_select.return_value = [mock_course]
+
+        result = runner.invoke(
+            kodekloud,
+            [
+                "dl",
+                "--token",
+                "direct_token",
+                "--search",
+                "cnpe",
+            ],
+        )
+        assert result.exit_code == 0
+        assert mock_select.called
+        assert mock_select.call_args[1].get("query") == "cnpe"

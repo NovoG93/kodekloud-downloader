@@ -45,45 +45,115 @@ def parse_input(input_str: str) -> List[int]:
     return result
 
 
-def select_courses(courses: List[Course]) -> List[Course]:
+def render_course_table(
+    indexed_courses: List[Tuple[int, Course]],
+) -> prettytable.PrettyTable:
     """
-    Display a table of courses and ask the user to select one or
-    multiple courses by entering its number.
+    Build a PrettyTable displaying course numbers, titles, instructors, types,
+    and categories.
 
-    :param courses: A list of Course objects to choose from
-    :return: The selected list of Course object
+    :param indexed_courses: List of (1-based index, Course) tuples
+    :return: Formatted PrettyTable instance
     """
     table = prettytable.PrettyTable()
-    table.field_names = ["No.", "Name", "Type", "Categories"]
+    table.field_names = ["No.", "Name", "Instructor", "Type", "Categories"]
 
-    for i, course in enumerate(courses):
+    for original_idx, course in indexed_courses:
+        instructor_str = ", ".join([tutor.name for tutor in course.tutors]) or "N/A"
+        category_str = ", ".join([cat.name for cat in course.categories])
         table.add_row(
             [
-                i + 1,
+                original_idx,
                 course.title,
+                instructor_str,
                 course.plan,
-                ", ".join([category.name for category in course.categories]),
+                category_str,
             ]
         )
 
     table.align["No."] = "l"
     table.align["Name"] = "l"
+    table.align["Instructor"] = "l"
     table.align["Type"] = "l"
     table.align["Categories"] = "l"
+    return table
 
-    print(table)
 
-    user_selected_courses = []
-    selected_courses = parse_input(
-        input(
-            "Enter the courses you want to select "
-            "(Multiple courses can be passes using this format 1,6-9,10-11): "
+def _filter_courses(courses: List[Course], query: str) -> List[Tuple[int, Course]]:
+    """Filter courses by keyword across title, instructor, category, and slug."""
+    q = query.strip().lower()
+    matches: List[Tuple[int, Course]] = []
+    for idx, course in enumerate(courses, start=1):
+        title = course.title.lower()
+        slug = course.slug.lower()
+        instructors = " ".join([t.name.lower() for t in course.tutors])
+        categories = " ".join([c.name.lower() for c in course.categories])
+        if q in title or q in slug or q in instructors or q in categories:
+            matches.append((idx, course))
+    return matches
+
+
+def select_courses(courses: List[Course], query: Optional[str] = None) -> List[Course]:
+    """
+    Display a table of courses and ask the user to select one or
+    multiple courses by entering its number, or filter interactively by keyword.
+
+    :param courses: A list of Course objects to choose from
+    :param query: Optional initial search term to pre-filter courses
+    :return: The selected list of Course objects
+    """
+    indexed_all: List[Tuple[int, Course]] = list(enumerate(courses, start=1))
+
+    current_items = _filter_courses(courses, query) if query else indexed_all
+    if query and not current_items:
+        print(
+            f"No courses found matching initial filter '{query}'. Showing all courses."
         )
-    )
-    for selected_course in selected_courses:
-        user_selected_courses.append(courses[int(selected_course) - 1])
+        current_items = indexed_all
 
-    return user_selected_courses
+    print(render_course_table(current_items))
+
+    while True:
+        prompt = (
+            "Enter course number(s) to select (e.g. 1,6-9), "
+            "search keyword to filter (or 'all'/'q'): "
+        )
+        try:
+            user_input = input(prompt).strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return []
+
+        if not user_input:
+            continue
+
+        if user_input.lower() in ("q", "quit", "exit"):
+            return []
+
+        if user_input.lower() == "all":
+            current_items = indexed_all
+            print(render_course_table(current_items))
+            continue
+
+        try:
+            selected_indices = parse_input(user_input)
+            invalid = [i for i in selected_indices if i < 1 or i > len(courses)]
+            if invalid:
+                print(
+                    f"Error: Course number(s) {invalid} out of range "
+                    f"(1 - {len(courses)})."
+                )
+                continue
+            return [courses[i - 1] for i in selected_indices]
+        except ValueError:
+            # User entered a search term instead of numeric range
+            filtered = _filter_courses(courses, user_input)
+            if filtered:
+                current_items = filtered
+                print(render_course_table(current_items))
+                print(f"Found {len(filtered)} course(s) matching '{user_input}'.")
+            else:
+                print(f"No courses found matching '{user_input}'. Try another search.")
 
 
 # Characters not allowed in Windows filenames

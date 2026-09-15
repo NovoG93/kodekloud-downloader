@@ -69,6 +69,12 @@ def kodekloud(verbose):
     type=int,
     help="If same video is downloaded this many times, then download stops",
 )
+@click.option(
+    "--search",
+    "-s",
+    default=None,
+    help="Filter course list by keyword (title, instructor, or category).",
+)
 def dl(
     course_url,
     quality: str,
@@ -77,6 +83,7 @@ def dl(
     browser: bool,
     token: Optional[str],
     max_duplicate_count: int,
+    search: Optional[str],
 ):
     session_token: Optional[str] = None
 
@@ -141,7 +148,7 @@ def dl(
 
     if course_url is None:
         courses = collect_all_courses()
-        selected_courses = select_courses(courses)
+        selected_courses = select_courses(courses, query=search)
         for selected_course in selected_courses:
             download_course(
                 course=selected_course,

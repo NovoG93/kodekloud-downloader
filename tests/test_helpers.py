@@ -206,3 +206,96 @@ def test_extract_resource_urls_normalizes_github_blob():
         == "https://raw.githubusercontent.com/cncf/curriculum/master/PCA_Curriculum.pdf"
     )
     assert urls[0][1] == "PCA Curriculum"
+
+
+def _make_test_course(
+    idx: int, title: str, slug: str, tutor_names: list, categories: list
+):
+    from kodekloud_downloader.models.courses import Category, Course, Tutor
+
+    return Course(
+        id=f"id-{idx}",
+        slug=slug,
+        title=title,
+        thumbnail_url="https://example.com/thumb.png",
+        tutors=[
+            Tutor(
+                id=f"t-{name}",
+                name=name,
+                bio="",
+                description="",
+                avatar_url="https://example.com/a.png",
+            )
+            for name in tutor_names
+        ],
+        popularity=100,
+        difficulty_level="Beginner",
+        categories=[Category(id=f"c-{c}", name=c) for c in categories],
+        plan="Standard",
+    )
+
+
+def test_render_course_table_includes_instructor():
+    from kodekloud_downloader.helpers import render_course_table
+
+    c1 = _make_test_course(
+        1, "CNPE Prep", "cnpe-prep", ["Nourhan Mohamed"], ["Cloud", "DevOps"]
+    )
+    table = render_course_table([(1, c1)])
+    assert "Instructor" in table.field_names
+    assert "Nourhan Mohamed" in str(table)
+    assert "CNPE Prep" in str(table)
+
+
+def test_filter_courses_matches_tutor_title_category():
+    from kodekloud_downloader.helpers import _filter_courses
+
+    c1 = _make_test_course(
+        1, "CNPE Prep Course", "cnpe", ["Nourhan Mohamed"], ["Cloud"]
+    )
+    c2 = _make_test_course(
+        2, "Docker Absolute", "docker", ["Mumshad Mannambeth"], ["DevOps"]
+    )
+    courses = [c1, c2]
+
+    # Filter by tutor
+    res = _filter_courses(courses, "nourhan")
+    assert len(res) == 1
+    assert res[0][0] == 1  # 1-based index
+    assert res[0][1].title == "CNPE Prep Course"
+
+    # Filter by title / slug
+    res = _filter_courses(courses, "docker")
+    assert len(res) == 1
+    assert res[0][0] == 2
+
+    # Filter by category
+    res = _filter_courses(courses, "cloud")
+    assert len(res) == 1
+    assert res[0][0] == 1
+
+    # No match
+    assert _filter_courses(courses, "nonexistent") == []
+
+
+def test_select_courses_interactive_search():
+    from kodekloud_downloader.helpers import select_courses
+
+    c1 = _make_test_course(
+        1, "CNPE Prep Course", "cnpe", ["Nourhan Mohamed"], ["Cloud"]
+    )
+    c2 = _make_test_course(
+        2, "Docker Absolute", "docker", ["Mumshad Mannambeth"], ["DevOps"]
+    )
+    courses = [c1, c2]
+
+    # User searches for 'nourhan', then enters course number '1'
+    with patch("builtins.input", side_effect=["nourhan", "1"]):
+        selected = select_courses(courses)
+        assert len(selected) == 1
+        assert selected[0].title == "CNPE Prep Course"
+
+    # User quits immediately
+    with patch("builtins.input", side_effect=["q"]):
+        selected = select_courses(courses)
+        assert selected == []
