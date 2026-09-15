@@ -172,3 +172,37 @@ def test_download_all_resources_handles_download_failure_gracefully(tmp_path: Pa
             download_path=tmp_path,
         )
         assert downloaded == []
+
+
+def test_normalize_resource_url():
+    from kodekloud_downloader.helpers import normalize_resource_url
+
+    # GitHub blob URL converts to raw
+    github_blob = "https://github.com/cncf/curriculum/blob/master/PCA_Curriculum.pdf"
+    assert (
+        normalize_resource_url(github_blob)
+        == "https://raw.githubusercontent.com/cncf/curriculum/master/PCA_Curriculum.pdf"
+    )
+
+    # Standard URL stays untouched
+    std_url = "https://example.com/files/slides.pdf"
+    assert normalize_resource_url(std_url) == std_url
+
+    # GitHub raw URL stays untouched
+    raw_url = (
+        "https://raw.githubusercontent.com/cncf/curriculum/master/PCA_Curriculum.pdf"
+    )
+    assert normalize_resource_url(raw_url) == raw_url
+
+
+def test_extract_resource_urls_normalizes_github_blob():
+    from kodekloud_downloader.helpers import extract_resource_urls
+
+    md = "[PCA Curriculum](https://github.com/cncf/curriculum/blob/master/PCA_Curriculum.pdf)"
+    urls = extract_resource_urls(md)
+    assert len(urls) == 1
+    assert (
+        urls[0][0]
+        == "https://raw.githubusercontent.com/cncf/curriculum/master/PCA_Curriculum.pdf"
+    )
+    assert urls[0][1] == "PCA Curriculum"

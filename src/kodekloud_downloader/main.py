@@ -360,12 +360,18 @@ def download_resource_lesson(
 
     # 3. Save markdown content and download any attached resources
     if content_markdown and content_markdown.strip():
-        logger.info(f"Writing resource file... {file_path}...")
+        notes_path = file_path.with_suffix(".md")
+        logger.info(f"Writing article notes... {notes_path}...")
         file_path.parent.mkdir(parents=True, exist_ok=True)
-        file_path.with_suffix(".md").write_text(content_markdown, encoding="utf-8")
-        download_all_resources(
+        notes_path.write_text(content_markdown, encoding="utf-8")
+        downloaded = download_all_resources(
             content=content_markdown,
             download_path=file_path.parent,
             cookie=cookie,
             session_token=session_token,
         )
+        if not downloaded:
+            logger.info(
+                "No attached downloadable resources (PDF/ZIP/slides) "
+                "found in this lesson."
+            )

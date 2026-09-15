@@ -232,6 +232,24 @@ def _is_resource_target(url_or_name: str) -> bool:
     return any(clean.endswith(ext) for ext in RESOURCE_EXTENSIONS)
 
 
+def normalize_resource_url(url: str) -> str:
+    """
+    Normalize URLs for direct downloading.
+    Converts GitHub blob URLs (e.g. github.com/owner/repo/blob/ref/path)
+    to raw URLs (raw.githubusercontent.com/owner/repo/ref/path).
+
+    :param url: The resource URL.
+    :return: Normalized direct download URL.
+    """
+    github_blob_match = re.match(
+        r"^https?://github\.com/([^/]+)/([^/]+)/blob/(.+)$", url
+    )
+    if github_blob_match:
+        owner, repo, rest = github_blob_match.groups()
+        return f"https://raw.githubusercontent.com/{owner}/{repo}/{rest}"
+    return url
+
+
 def extract_resource_urls(content: Any) -> List[Tuple[str, str]]:
     """
     Extract (url, title_or_text) pairs for downloadable resources from Markdown or HTML.
@@ -249,24 +267,28 @@ def extract_resource_urls(content: Any) -> List[Tuple[str, str]]:
             if href and isinstance(href, str) and href.startswith("http"):
                 text = link.get_text(strip=True)
                 if _is_resource_target(href) or _is_resource_target(text):
-                    if href not in seen_urls:
-                        seen_urls.add(href)
-                        results.append((href, text))
+                    norm_url = normalize_resource_url(href)
+                    if norm_url not in seen_urls:
+                        seen_urls.add(norm_url)
+                        results.append((norm_url, text))
     elif isinstance(content, str):
         # Markdown links: [Link Text](https://url)
         md_links = re.findall(r"(?<!!)\[([^\]]*)\]\((https?://[^\s\)\"\']+)\)", content)
         for text, url in md_links:
             if _is_resource_target(url) or _is_resource_target(text):
-                if url not in seen_urls:
-                    seen_urls.add(url)
-                    results.append((url, text))
+                norm_url = normalize_resource_url(url)
+                if norm_url not in seen_urls:
+                    seen_urls.add(norm_url)
+                    results.append((norm_url, text))
 
         # Bare URLs: https://...
         bare_urls = re.findall(r"(https?://[^\s\"\'<>\[\]\)]+)", content)
         for url in bare_urls:
-            if _is_resource_target(url) and url not in seen_urls:
-                seen_urls.add(url)
-                results.append((url, ""))
+            if _is_resource_target(url):
+                norm_url = normalize_resource_url(url)
+                if norm_url not in seen_urls:
+                    seen_urls.add(norm_url)
+                    results.append((norm_url, ""))
 
     return results
 
@@ -309,6 +331,7 @@ def download_all_resources(
     if not items:
         return downloaded_files
 
+    logger.info(f"Found {len(items)} downloadable resource(s) attached.")
     download_path.mkdir(parents=True, exist_ok=True)
     headers: dict = {}
     if session_token:
@@ -317,6 +340,7 @@ def download_all_resources(
         headers["Cookie"] = cookie
 
     for url, title in items:
+        url = normalize_resource_url(url)
         file_name = _resolve_resource_filename(url, title)
         target_path = download_path / file_name
 
